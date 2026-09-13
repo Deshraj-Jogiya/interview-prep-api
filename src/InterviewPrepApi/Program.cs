@@ -6,6 +6,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Open CORS: this is a public, read-mostly reference API meant to be called
+// directly from other clients (e.g. the companion mobile app), not just
+// same-origin browser code -- there's no cookie/session auth to protect here.
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+});
+
 var connectionString = builder.Configuration.GetConnectionString("Default") ?? "Data Source=interview_prep.db";
 builder.Services.AddDbContext<InterviewPrepDbContext>(options => options.UseSqlite(connectionString));
 
@@ -32,6 +40,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseCors();
 
 app.MapGet("/api/questions", async (InterviewPrepDbContext db, string? category) =>
 {

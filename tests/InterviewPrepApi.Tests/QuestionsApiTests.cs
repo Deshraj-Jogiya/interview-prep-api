@@ -62,6 +62,18 @@ public class QuestionsApiTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task Cors_AllowsARequestFromAnyOrigin()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/questions");
+        request.Headers.Add("Origin", "https://example.com");
+
+        var response = await _client.SendAsync(request);
+
+        response.EnsureSuccessStatusCode();
+        Assert.True(response.Headers.Contains("Access-Control-Allow-Origin"));
+    }
+
+    [Fact]
     public async Task PostQuestion_RejectsAMissingRequiredField()
     {
         var invalid = new InterviewQuestion { Category = "", Question = "Missing category" };
