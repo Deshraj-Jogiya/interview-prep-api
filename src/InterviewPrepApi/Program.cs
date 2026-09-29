@@ -80,6 +80,102 @@ app.MapPost("/api/questions", async (InterviewPrepDbContext db, InterviewQuestio
     return Results.Created($"/api/questions/{question.Id}", question);
 });
 
+// Real spaced-repetition scheduling (SM-2 -- see SpacedRepetition.cs).
+// A question with NextReviewAt == null has never been practiced and is
+// always due; otherwise due means the scheduled date has passed.
+app.MapGet("/api/questions/due", async (InterviewPrepDbContext db) =>
+{
+    var now = DateTime.UtcNow;
+    var due = await db.Questions
+        .Where(q => q.NextReviewAt == null || q.NextReviewAt <= now)
+        .ToListAsync();
+    return Results.Ok(due);
+});
+
+app.MapPost("/api/questions/{id:int}/attempts", async (InterviewPrepDbContext db, int id, PracticeAttemptRequest request) =>
+{
+    if (request.SelfRating < 1 || request.SelfRating > 5)
+    {
+        return Results.BadRequest(new { error = "selfRating must be between 1 and 5" });
+    }
+
+    var question = await db.Questions.FindAsync(id);
+    if (question is null)
+    {
+        return Results.NotFound(new { error = $"No question with id {id}." });
+    }
+
+    var current = new SpacedRepetition.State(question.EaseFactor, question.IntervalDays, question.Repetitions);
+    var next = SpacedRepetition.Schedule(current, request.SelfRating);
+
+    question.EaseFactor = next.EaseFactor;
+    question.IntervalDays = next.IntervalDays;
+    question.Repetitions = next.Repetitions;
+    question.NextReviewAt = DateTime.UtcNow.AddDays(next.IntervalDays);
+
+    db.PracticeAttempts.Add(new PracticeAttempt
+    {
+        QuestionId = id,
+        AttemptedAt = DateTime.UtcNow,
+        SelfRating = request.SelfRating,
+    });
+
+    await db.SaveChangesAsync();
+    return Results.Ok(question);
+});
+
+app.MapGet("/api/questions/{id:int}/attempts", async (InterviewPrepDbContext db, int id) =>
+{
+    var attempts = await db.PracticeAttempts
+        .Where(a => a.QuestionId == id)
+        .OrderByDescending(a => a.AttemptedAt)
+        .ToListAsync();
+    return Results.Ok(attempts);
+});
+
+// Real aggregate progress, not fabricated placeholder numbers -- streak
+// is computed from actual distinct calendar days with at least one real
+// attempt, counting back from today (or yesterday, if today has no
+// attempt yet) until the first gap.
+app.MapGet("/api/stats", async (InterviewPrepDbContext db) =>
+{
+    var totalAttempts = await db.PracticeAttempts.CountAsync();
+    var questionsMastered = await db.Questions.CountAsync(q => q.Repetitions >= 3 && q.EaseFactor >= 2.5);
+
+    var attemptDates = (await db.PracticeAttempts
+        .Select(a => a.AttemptedAt.Date)
+        .Distinct()
+        .ToListAsync())
+        .OrderByDescending(d => d)
+        .ToList();
+
+    int streak = 0;
+    if (attemptDates.Count > 0)
+    {
+        var today = DateTime.UtcNow.Date;
+        var cursor = attemptDates[0] == today ? today : (attemptDates[0] == today.AddDays(-1) ? today.AddDays(-1) : DateTime.MinValue);
+        if (cursor != DateTime.MinValue)
+        {
+            var dateSet = attemptDates.ToHashSet();
+            while (dateSet.Contains(cursor))
+            {
+                streak++;
+                cursor = cursor.AddDays(-1);
+            }
+        }
+    }
+
+    return Results.Ok(new
+    {
+        totalAttempts,
+        questionsMastered,
+        totalQuestions = await db.Questions.CountAsync(),
+        currentStreakDays = streak,
+    });
+});
+
 app.Run();
 
 public partial class Program { }
+
+public record PracticeAttemptRequest(int SelfRating);
