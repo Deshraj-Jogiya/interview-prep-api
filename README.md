@@ -1,64 +1,41 @@
 # Interview Prep API
 
-A real ASP.NET Core minimal API (C#) for interview-prep questions, backed by Entity
-Framework Core + SQLite, with real spaced-repetition scheduling -- not just a CRUD
-demo.
+[![ci](https://github.com/Deshraj-Jogiya/interview-prep-api/actions/workflows/ci.yml/badge.svg)](https://github.com/Deshraj-Jogiya/interview-prep-api/actions/workflows/ci.yml) ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-## Spaced repetition (SM-2)
+An ASP.NET Core minimal API for practising interview questions with spaced repetition: each question is rescheduled with the SM-2
+algorithm after every self-rated attempt, backed by Entity Framework Core and SQLite.
 
-Every question tracks its own scheduling state (`EaseFactor`, `IntervalDays`,
-`Repetitions`, `NextReviewAt`) and gets rescheduled after each practice attempt using
-SM-2, the same real algorithm behind Anki and most production spaced-repetition tools
-(Piotr Wozniak, 1987). A self-rating of 1-2 out of 5 counts as a lapse and resets the
-interval; 3+ grows it, with the growth rate itself increasing the more consistently a
-question is recalled well. See `SpacedRepetition.cs` for the pure, directly
-unit-tested implementation.
+## Highlights
 
-## Endpoints
+- **SM-2 scheduling** (`SpacedRepetition.cs`): ease factor, interval and repetition count per question; a rating of 1–2 resets the
+  interval, 3+ grows it. Unit-tested on its own.
+- **Endpoints:** list and filter questions, pick a random one, list the ones due now, add a question, record an attempt, read a question's
+  history, and `GET /api/stats` (attempts, questions mastered, current streak from distinct practice days).
+- **Integration tests** with `WebApplicationFactory` and an in-memory SQLite connection held open for the test host, plus a curl check
+  against the running app.
 
-- `GET /api/questions?category=` -- list questions, optionally filtered by category.
-- `GET /api/questions/random?category=` -- one random question (optionally filtered);
-  404 if nothing matches.
-- `GET /api/questions/due` -- questions due for practice right now (never-practiced
-  questions are always due).
-- `POST /api/questions` -- add a question (`category`, `question`, `difficulty`); 400 if
-  a required field is blank.
-- `POST /api/questions/{id}/attempts` -- record a real practice attempt (`selfRating`
-  1-5), reschedules the question via SM-2, returns the updated question. 404 for an
-  unknown question, 400 for a rating outside 1-5.
-- `GET /api/questions/{id}/attempts` -- real practice history for one question.
-- `GET /api/stats` -- real aggregate progress: total attempts, questions mastered
-  (3+ repetitions at a healthy ease factor), and a real current streak computed from
-  actual distinct practice days, not a placeholder.
+## Architecture
 
-The database is seeded with 4 real starter questions (System Design, Behavioral, SQL) on
-first run if empty.
-
-## Running it
-
-```bash
-cd src/InterviewPrepApi
-dotnet run
+```mermaid
+flowchart LR
+    C[client / mobile app] -- HTTP --> API[ASP.NET Core minimal API]
+    API --> SR[SpacedRepetition (SM-2)]
+    API --> EF[EF Core DbContext]
+    EF --> DB[(SQLite)]
 ```
 
+## Stack
+
+C#, .NET, ASP.NET Core, Entity Framework Core, SQLite, xUnit, GitHub Actions.
+
+## Run it
+
 ```bash
+cd src/InterviewPrepApi && dotnet run
 curl http://localhost:5000/api/questions/due
-curl -X POST http://localhost:5000/api/questions/1/attempts \
-  -H "Content-Type: application/json" \
-  -d '{"selfRating": 4}'
+curl -X POST http://localhost:5000/api/questions/1/attempts -H "Content-Type: application/json" -d '{"selfRating": 4}'
 curl http://localhost:5000/api/stats
+dotnet test            # from the repository root
 ```
 
-## Testing
-
-```bash
-dotnet test
-```
-
-Real integration tests (`WebApplicationFactory<Program>` + a real Sqlite `:memory:`
-connection kept open for the test host's lifetime, not a mock) covering listing,
-filtering, the random-pick 404 case, creating a question, validation, the due-question
-gate, attempt posting and history, and stats/streak accuracy -- plus a separate,
-dependency-free unit-test suite for the SM-2 scheduling algorithm itself (first-review
-interval, second-review interval, ease-factor growth on a good recall, the real 1.3
-floor on repeated lapses, out-of-range rating validation).
+Companion app: [interview-prep-mobile](https://github.com/Deshraj-Jogiya/interview-prep-mobile).
